@@ -1,25 +1,22 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
-  Terminal, 
-  GitBranch, 
-  GitCommit, 
-  GitMerge, 
-  GitPullRequest, 
-  AlertTriangle, 
-  Trash2, 
-  RefreshCw, 
-  UploadCloud, 
-  DownloadCloud,
-  FileText,
-  Plus,
-  Minus,
-  CheckCircle2,
-  XCircle,
-  FolderGit2
+  Terminal, GitBranch, GitCommit, GitMerge, AlertTriangle, 
+  Trash2, RefreshCw, UploadCloud, DownloadCloud, FileText, 
+  CheckCircle2, FolderGit2, Settings, Github, LogIn, 
+  ChevronDown, X, Key, ShieldAlert, Cloud
 } from 'lucide-react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
+
+type ConfirmDialogState = {
+  isOpen: boolean;
+  title: string;
+  message: string;
+  action: () => void;
+  actionText: string;
+  isDestructive: boolean;
+};
 
 export default function GitBossPage() {
   const [terminalLogs, setTerminalLogs] = useState<string[]>([
@@ -36,72 +33,258 @@ export default function GitBossPage() {
   ]);
 
   const [isWorking, setIsWorking] = useState(false);
+  const [isGithubLoggedIn, setIsGithubLoggedIn] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [apiKey, setApiKey] = useState('');
+  const [currentBranch, setCurrentBranch] = useState('feature/new-dashboard');
+  const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
+  
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>({
+    isOpen: false,
+    title: '',
+    message: '',
+    action: () => {},
+    actionText: '',
+    isDestructive: false
+  });
+
+  const terminalEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [terminalLogs]);
 
   const executeCommand = (command: string, logs: string[]) => {
     setIsWorking(true);
     setTerminalLogs(prev => [...prev, '', `> ${command}`]);
     
-    // Simulate command execution delay
     setTimeout(() => {
       setTerminalLogs(prev => [...prev, ...logs]);
       setIsWorking(false);
     }, 800);
   };
 
+  const requestConfirmation = (
+    title: string, 
+    message: string, 
+    actionText: string, 
+    isDestructive: boolean, 
+    action: () => void
+  ) => {
+    setConfirmDialog({
+      isOpen: true,
+      title,
+      message,
+      actionText,
+      isDestructive,
+      action: () => {
+        setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+        action();
+      }
+    });
+  };
+
+  // --- Actions ---
+
   const handleNukeChanges = () => {
-    executeCommand('git reset --hard HEAD && git clean -fd', [
-      'HEAD is now at 8f3a2b1 Update dashboard layout',
-      'Removing untracked files...',
-      'Working tree clean. All uncommitted changes have been forcefully removed.'
-    ]);
+    requestConfirmation(
+      "Nuke All Changes?",
+      "This will forcefully permanently delete all uncommitted changes in your working directory. This action CANNOT be undone.",
+      "Nuke It",
+      true,
+      () => executeCommand('git reset --hard HEAD && git clean -fd', [
+        'HEAD is now at 8f3a2b1 Update dashboard layout',
+        'Removing untracked files...',
+        'Working tree clean. All uncommitted changes have been forcefully removed.'
+      ])
+    );
   };
 
   const handleForcePush = () => {
-    executeCommand('git push --force-with-lease origin feature/new-dashboard', [
-      'Enumerating objects: 5, done.',
-      'Counting objects: 100% (5/5), done.',
-      'Delta compression using up to 8 threads',
-      'Compressing objects: 100% (3/3), done.',
-      'Writing objects: 100% (3/3), 328 bytes | 328.00 KiB/s, done.',
-      'Total 3 (delta 2), reused 0 (delta 0), pack-reused 0',
-      'To github.com:user/repo.git',
-      ' + 8f3a2b1...a1b2c3d feature/new-dashboard -> feature/new-dashboard (forced update)'
-    ]);
+    requestConfirmation(
+      "Force Push to Remote?",
+      "This will overwrite the remote branch with your local history. If others have pushed changes, their work will be lost.",
+      "Force Push",
+      true,
+      () => executeCommand(`git push --force-with-lease origin ${currentBranch}`, [
+        'Enumerating objects: 5, done.',
+        'Counting objects: 100% (5/5), done.',
+        'Delta compression using up to 8 threads',
+        'Compressing objects: 100% (3/3), done.',
+        'Writing objects: 100% (3/3), 328 bytes | 328.00 KiB/s, done.',
+        'Total 3 (delta 2), reused 0 (delta 0), pack-reused 0',
+        'To github.com:user/repo.git',
+        ` + 8f3a2b1...a1b2c3d ${currentBranch} -> ${currentBranch} (forced update)`
+      ])
+    );
+  };
+
+  const handleForceMerge = () => {
+    requestConfirmation(
+      "Force Merge (Theirs)?",
+      "This will merge the target branch and automatically resolve ALL conflicts by accepting THEIR changes. Your conflicting changes will be lost.",
+      "Force Merge",
+      true,
+      () => executeCommand('git merge main -X theirs', [
+        'Auto-merging app/page.tsx',
+        'Merge made by the "ort" strategy.',
+        ' app/page.tsx | 2 +-',
+        ' 1 file changed, 1 insertion(+), 1 deletion(-)'
+      ])
+    );
+  };
+
+  const handleSync = () => {
+    requestConfirmation(
+      "Sync with Remote?",
+      "This will fetch the latest changes from the remote and attempt to pull them into your current branch.",
+      "Sync Now",
+      false,
+      () => executeCommand(`git fetch origin && git pull origin ${currentBranch}`, [
+        'From github.com:user/repo',
+        ` * branch            ${currentBranch} -> FETCH_HEAD`,
+        'Already up to date.'
+      ])
+    );
   };
 
   const handleCommit = () => {
     executeCommand('git add . && git commit -m "Update UI components"', [
-      '[feature/new-dashboard a1b2c3d] Update UI components',
+      `[${currentBranch} a1b2c3d] Update UI components`,
       ' 2 files changed, 45 insertions(+), 12 deletions(-)'
     ]);
   };
 
+  const handlePull = () => {
+    requestConfirmation(
+      "Pull from Remote?",
+      "This will fetch and merge the latest changes from the remote branch into your current branch.",
+      "Pull",
+      false,
+      () => executeCommand(`git pull origin ${currentBranch}`, [
+        'Updating 8f3a2b1..a1b2c3d',
+        'Fast-forward',
+        ' app/page.tsx | 12 +++++++++---',
+        ' 1 file changed, 9 insertions(+), 3 deletions(-)'
+      ])
+    );
+  };
+
+  const handlePush = () => {
+    requestConfirmation(
+      "Push to Remote?",
+      "This will push your local commits to the remote repository.",
+      "Push",
+      false,
+      () => executeCommand(`git push origin ${currentBranch}`, [
+        'Enumerating objects: 5, done.',
+        'Counting objects: 100% (5/5), done.',
+        'Delta compression using up to 8 threads',
+        'Compressing objects: 100% (3/3), done.',
+        'Writing objects: 100% (3/3), 328 bytes | 328.00 KiB/s, done.',
+        'Total 3 (delta 2), reused 0 (delta 0), pack-reused 0',
+        `To github.com:user/repo.git`,
+        `   8f3a2b1..a1b2c3d  ${currentBranch} -> ${currentBranch}`
+      ])
+    );
+  };
+
+  const handleCheckout = (branch: string) => {
+    setIsBranchDropdownOpen(false);
+    if (branch === currentBranch) return;
+    executeCommand(`git checkout ${branch}`, [
+      `Switched to branch '${branch}'`,
+      `Your branch is up to date with 'origin/${branch}'.`
+    ]);
+    setCurrentBranch(branch);
+  };
+
+  const branches = ['main', 'feature/new-dashboard', 'bugfix/header-alignment', 'experimental/ai-tools'];
+
   return (
     <div className="min-h-screen flex flex-col bg-neutral-950 text-neutral-300 font-sans selection:bg-indigo-500/30">
+      
       {/* Header */}
-      <header className="h-14 border-b border-neutral-800 bg-neutral-900/50 flex items-center justify-between px-4 shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded bg-indigo-600 flex items-center justify-center text-white font-bold">
-            GB
-          </div>
-          <div>
-            <h1 className="text-sm font-semibold text-neutral-100">GitBoss</h1>
-            <div className="text-xs text-neutral-500 flex items-center gap-1">
-              <FolderGit2 className="w-3 h-3" />
-              <span>~/projects/awesome-app</span>
+      <header className="h-14 border-b border-neutral-800 bg-neutral-900/80 backdrop-blur-md flex items-center justify-between px-4 shrink-0 z-10">
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded bg-indigo-600 flex items-center justify-center text-white font-bold shadow-lg shadow-indigo-500/20">
+              GB
             </div>
+            <div>
+              <h1 className="text-sm font-semibold text-neutral-100 tracking-tight">GitBoss</h1>
+              <div className="text-xs text-neutral-500 flex items-center gap-1">
+                <FolderGit2 className="w-3 h-3" />
+                <span>~/projects/awesome-app</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="h-6 w-px bg-neutral-800 mx-2" />
+
+          {/* Branch Selector */}
+          <div className="relative">
+            <button 
+              onClick={() => setIsBranchDropdownOpen(!isBranchDropdownOpen)}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-neutral-800/50 border border-neutral-700/50 hover:bg-neutral-800 transition-colors text-sm"
+            >
+              <GitBranch className="w-4 h-4 text-indigo-400" />
+              <span className="font-medium text-neutral-200">{currentBranch}</span>
+              <ChevronDown className="w-3 h-3 text-neutral-500" />
+            </button>
+
+            <AnimatePresence>
+              {isBranchDropdownOpen && (
+                <motion.div 
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="absolute top-full left-0 mt-2 w-56 bg-neutral-900 border border-neutral-800 rounded-md shadow-xl overflow-hidden z-50"
+                >
+                  <div className="p-2 text-xs font-semibold text-neutral-500 uppercase tracking-wider border-b border-neutral-800">
+                    Switch Branch
+                  </div>
+                  <div className="max-h-48 overflow-y-auto p-1">
+                    {branches.map(b => (
+                      <button
+                        key={b}
+                        onClick={() => handleCheckout(b)}
+                        className={`w-full text-left px-3 py-2 text-sm rounded-md flex items-center gap-2 transition-colors ${
+                          b === currentBranch ? 'bg-indigo-500/10 text-indigo-400' : 'hover:bg-neutral-800 text-neutral-300'
+                        }`}
+                      >
+                        <GitBranch className="w-3.5 h-3.5" />
+                        <span className="truncate">{b}</span>
+                        {b === currentBranch && <CheckCircle2 className="w-3.5 h-3.5 ml-auto" />}
+                      </button>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </div>
         
-        <div className="flex items-center gap-4 text-sm">
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-neutral-800/50 border border-neutral-700/50">
-            <GitBranch className="w-4 h-4 text-indigo-400" />
-            <span className="font-medium text-neutral-200">feature/new-dashboard</span>
-          </div>
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-neutral-800/50 border border-neutral-700/50">
-            <RefreshCw className="w-4 h-4 text-neutral-400" />
-            <span>Up to date</span>
-          </div>
+        <div className="flex items-center gap-3 text-sm">
+          {/* GitHub Login */}
+          <button 
+            onClick={() => setIsGithubLoggedIn(!isGithubLoggedIn)}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-md border transition-colors ${
+              isGithubLoggedIn 
+                ? 'bg-neutral-800/50 border-neutral-700/50 text-neutral-200' 
+                : 'bg-indigo-600 hover:bg-indigo-700 border-indigo-500 text-white'
+            }`}
+          >
+            <Github className="w-4 h-4" />
+            {isGithubLoggedIn ? 'vleonardo2006' : 'Connect GitHub'}
+          </button>
+
+          <button 
+            onClick={() => setIsSettingsOpen(true)}
+            className="p-1.5 rounded-md text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800 transition-colors"
+          >
+            <Settings className="w-5 h-5" />
+          </button>
         </div>
       </header>
 
@@ -138,16 +321,16 @@ export default function GitBossPage() {
             </div>
           </div>
 
-          <div className="p-4 flex-1">
+          <div className="p-4 flex-1 flex flex-col">
             <h2 className="text-xs font-bold uppercase tracking-wider text-neutral-500 mb-4">Commit</h2>
             <textarea 
-              className="w-full h-24 bg-neutral-900 border border-neutral-700 rounded-md p-3 text-sm text-neutral-200 placeholder:text-neutral-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 resize-none mb-3"
+              className="w-full flex-1 min-h-[120px] bg-neutral-900 border border-neutral-700 rounded-md p-3 text-sm text-neutral-200 placeholder:text-neutral-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 resize-none mb-3"
               placeholder="What did you change, boss?"
             />
             <button 
               onClick={handleCommit}
               disabled={isWorking}
-              className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-sm font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-sm font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
             >
               <CheckCircle2 className="w-4 h-4" />
               Commit Changes
@@ -178,8 +361,51 @@ export default function GitBossPage() {
           </div>
         </div>
 
-        {/* Right Sidebar - Forceful Actions */}
-        <div className="w-72 border-l border-neutral-800 bg-neutral-900/20 p-4 flex flex-col gap-6">
+        {/* Right Sidebar - Actions */}
+        <div className="w-72 border-l border-neutral-800 bg-neutral-900/20 p-4 flex flex-col gap-8 overflow-y-auto">
+          
+          {/* Standard Remote Actions */}
+          <div>
+            <h2 className="text-xs font-bold uppercase tracking-wider text-neutral-500 mb-4 flex items-center gap-2">
+              <Cloud className="w-4 h-4 text-blue-400" />
+              Remote
+            </h2>
+            <div className="space-y-2">
+              <button 
+                onClick={handleSync}
+                disabled={isWorking || !isGithubLoggedIn}
+                className="w-full p-2.5 rounded-md bg-neutral-900 border border-neutral-800 hover:border-neutral-600 transition-all flex items-center gap-3 disabled:opacity-50"
+              >
+                <RefreshCw className="w-4 h-4 text-blue-400" />
+                <div className="text-left">
+                  <div className="text-sm font-medium text-neutral-200">Sync</div>
+                </div>
+              </button>
+              <div className="grid grid-cols-2 gap-2">
+                <button 
+                  onClick={handlePull}
+                  disabled={isWorking || !isGithubLoggedIn}
+                  className="p-2.5 rounded-md bg-neutral-900 border border-neutral-800 hover:border-neutral-600 transition-all flex flex-col items-center gap-2 disabled:opacity-50"
+                >
+                  <DownloadCloud className="w-4 h-4 text-neutral-400" />
+                  <span className="text-xs font-medium text-neutral-300">Pull</span>
+                </button>
+                <button 
+                  onClick={handlePush}
+                  disabled={isWorking || !isGithubLoggedIn}
+                  className="p-2.5 rounded-md bg-neutral-900 border border-neutral-800 hover:border-neutral-600 transition-all flex flex-col items-center gap-2 disabled:opacity-50"
+                >
+                  <UploadCloud className="w-4 h-4 text-neutral-400" />
+                  <span className="text-xs font-medium text-neutral-300">Push</span>
+                </button>
+              </div>
+              {!isGithubLoggedIn && (
+                <p className="text-[10px] text-amber-500/80 mt-2 text-center">Connect GitHub to enable remote actions</p>
+              )}
+            </div>
+          </div>
+
+          {/* Forceful Actions */}
           <div>
             <h2 className="text-xs font-bold uppercase tracking-wider text-neutral-500 mb-4 flex items-center gap-2">
               <AlertTriangle className="w-4 h-4 text-amber-500" />
@@ -209,8 +435,8 @@ export default function GitBossPage() {
 
               <button 
                 onClick={handleForcePush}
-                disabled={isWorking}
-                className="w-full relative group overflow-hidden rounded-md bg-neutral-900 border border-amber-900/30 hover:border-amber-500/50 transition-all"
+                disabled={isWorking || !isGithubLoggedIn}
+                className="w-full relative group overflow-hidden rounded-md bg-neutral-900 border border-amber-900/30 hover:border-amber-500/50 transition-all disabled:opacity-50"
               >
                 <div className="absolute inset-0 bg-amber-500/5 group-hover:bg-amber-500/10 transition-colors" />
                 <div className="relative p-3 flex items-center gap-3">
@@ -225,6 +451,7 @@ export default function GitBossPage() {
               </button>
               
               <button 
+                onClick={handleForceMerge}
                 disabled={isWorking}
                 className="w-full relative group overflow-hidden rounded-md bg-neutral-900 border border-indigo-900/30 hover:border-indigo-500/50 transition-all"
               >
@@ -278,8 +505,114 @@ export default function GitBossPage() {
               Executing...
             </motion.div>
           )}
+          <div ref={terminalEndRef} />
         </div>
       </div>
+
+      {/* Confirmation Modal */}
+      <AnimatePresence>
+        {confirmDialog.isOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-neutral-900 border border-neutral-800 rounded-xl shadow-2xl w-full max-w-md overflow-hidden"
+            >
+              <div className={`p-4 border-b ${confirmDialog.isDestructive ? 'border-red-900/30 bg-red-500/5' : 'border-neutral-800 bg-neutral-800/20'} flex items-center gap-3`}>
+                {confirmDialog.isDestructive ? (
+                  <ShieldAlert className="w-5 h-5 text-red-500" />
+                ) : (
+                  <AlertTriangle className="w-5 h-5 text-amber-500" />
+                )}
+                <h3 className="font-semibold text-neutral-100">{confirmDialog.title}</h3>
+              </div>
+              <div className="p-6">
+                <p className="text-sm text-neutral-300 leading-relaxed">
+                  {confirmDialog.message}
+                </p>
+              </div>
+              <div className="p-4 border-t border-neutral-800 bg-neutral-900/50 flex justify-end gap-3">
+                <button 
+                  onClick={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+                  className="px-4 py-2 rounded-md text-sm font-medium text-neutral-300 hover:bg-neutral-800 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={confirmDialog.action}
+                  className={`px-4 py-2 rounded-md text-sm font-medium text-white transition-colors ${
+                    confirmDialog.isDestructive 
+                      ? 'bg-red-600 hover:bg-red-700' 
+                      : 'bg-indigo-600 hover:bg-indigo-700'
+                  }`}
+                >
+                  {confirmDialog.actionText}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Settings Modal */}
+      <AnimatePresence>
+        {isSettingsOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-neutral-900 border border-neutral-800 rounded-xl shadow-2xl w-full max-w-md overflow-hidden"
+            >
+              <div className="p-4 border-b border-neutral-800 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Settings className="w-5 h-5 text-neutral-400" />
+                  <h3 className="font-semibold text-neutral-100">Settings</h3>
+                </div>
+                <button 
+                  onClick={() => setIsSettingsOpen(false)}
+                  className="text-neutral-500 hover:text-neutral-300 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="p-6 space-y-6">
+                
+                <div>
+                  <h4 className="text-sm font-medium text-neutral-200 mb-2 flex items-center gap-2">
+                    <Key className="w-4 h-4 text-indigo-400" />
+                    AI Assistant Configuration
+                  </h4>
+                  <p className="text-xs text-neutral-500 mb-4">
+                    Enter your Gemini API key to enable smart commit messages and conflict resolution assistance in the future.
+                  </p>
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium text-neutral-400 uppercase tracking-wider">Gemini API Key</label>
+                    <input 
+                      type="password"
+                      value={apiKey}
+                      onChange={(e) => setApiKey(e.target.value)}
+                      placeholder="AIzaSy..."
+                      className="w-full bg-neutral-950 border border-neutral-800 rounded-md p-2.5 text-sm text-neutral-200 placeholder:text-neutral-700 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+                </div>
+
+              </div>
+              <div className="p-4 border-t border-neutral-800 bg-neutral-900/50 flex justify-end gap-3">
+                <button 
+                  onClick={() => setIsSettingsOpen(false)}
+                  className="px-4 py-2 rounded-md text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 transition-colors"
+                >
+                  Save & Close
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
     </div>
   );
 }
