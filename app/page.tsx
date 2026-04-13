@@ -35,9 +35,17 @@ export default function GitBossPage() {
   const [isWorking, setIsWorking] = useState(false);
   const [isGithubLoggedIn, setIsGithubLoggedIn] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isMergeModalOpen, setIsMergeModalOpen] = useState(false);
+  const [mergeTargetBranch, setMergeTargetBranch] = useState('main');
   const [apiKey, setApiKey] = useState('');
   const [currentBranch, setCurrentBranch] = useState('feature/new-dashboard');
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
+  
+  const [currentView, setCurrentView] = useState<'home' | 'dashboard'>('home');
+  const [repoPathInput, setRepoPathInput] = useState('');
+  const [activeRepo, setActiveRepo] = useState('~/projects/awesome-app');
+  const [isValidating, setIsValidating] = useState(false);
+  const [repoError, setRepoError] = useState('');
   
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>({
     isOpen: false,
@@ -134,6 +142,18 @@ export default function GitBossPage() {
     );
   };
 
+  const handleClearStashes = () => {
+    requestConfirmation(
+      "Clear All Stashes?",
+      "This will permanently delete ALL stashed changes. They cannot be recovered.",
+      "Clear Stashes",
+      true,
+      () => executeCommand('git stash clear', [
+        'Dropped all stashes.'
+      ])
+    );
+  };
+
   const handleSync = () => {
     requestConfirmation(
       "Sync with Remote?",
@@ -192,14 +212,138 @@ export default function GitBossPage() {
   const handleCheckout = (branch: string) => {
     setIsBranchDropdownOpen(false);
     if (branch === currentBranch) return;
-    executeCommand(`git checkout ${branch}`, [
-      `Switched to branch '${branch}'`,
-      `Your branch is up to date with 'origin/${branch}'.`
+    requestConfirmation(
+      "Force Switch Branch?",
+      `This will forcefully switch to '${branch}'. Any uncommitted changes or conflicts blocking the switch will be discarded.`,
+      "Force Switch",
+      true,
+      () => {
+        executeCommand(`git checkout -f ${branch}`, [
+          `Switched to branch '${branch}'`,
+          `Your branch is up to date with 'origin/${branch}'.`
+        ]);
+        setCurrentBranch(branch);
+      }
+    );
+  };
+
+  const handleMergeConfirm = () => {
+    setIsMergeModalOpen(false);
+    executeCommand(`git merge ${mergeTargetBranch}`, [
+      `Updating 8f3a2b1..a1b2c3d`,
+      `Fast-forward`,
+      ` app/page.tsx | 12 +++++++++---`,
+      ` 1 file changed, 9 insertions(+), 3 deletions(-)`
     ]);
-    setCurrentBranch(branch);
+  };
+
+  const handleOpenRepo = (path: string) => {
+    if (!path.trim()) {
+      setRepoError('Path cannot be empty');
+      return;
+    }
+    setIsValidating(true);
+    setRepoError('');
+    setTimeout(() => {
+      if (path.toLowerCase().includes('system32') || path === '/') {
+        setRepoError('Permission denied or invalid Git repository.');
+        setIsValidating(false);
+        return;
+      }
+      setActiveRepo(path);
+      setIsValidating(false);
+      setCurrentView('dashboard');
+      setTerminalLogs([
+        `> cd ${path}`,
+        '> git status',
+        'On branch main',
+        'Your branch is up to date with origin/main.',
+        'nothing to commit, working tree clean'
+      ]);
+      setCurrentBranch('main');
+    }, 800);
   };
 
   const branches = ['main', 'feature/new-dashboard', 'bugfix/header-alignment', 'experimental/ai-tools'];
+
+  if (currentView === 'home') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-neutral-950 text-neutral-300 font-sans selection:bg-indigo-500/30 p-4">
+        <div className="w-full max-w-md">
+          <div className="flex flex-col items-center mb-8">
+            <div className="w-16 h-16 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-bold text-2xl shadow-lg shadow-indigo-500/20 mb-4">
+              GB
+            </div>
+            <h1 className="text-2xl font-bold text-neutral-100 tracking-tight">GitBoss</h1>
+            <p className="text-sm text-neutral-500 mt-2 text-center">The forceful Git GUI that actually listens to you.</p>
+          </div>
+
+          <div className="bg-neutral-900/50 border border-neutral-800 rounded-xl p-6 shadow-2xl">
+            <h2 className="text-sm font-semibold text-neutral-200 mb-4 flex items-center gap-2">
+              <FolderGit2 className="w-4 h-4 text-indigo-400" />
+              Open Repository
+            </h2>
+            
+            <div className="space-y-4">
+              <div>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Terminal className="w-4 h-4 text-neutral-500" />
+                  </div>
+                  <input 
+                    type="text"
+                    value={repoPathInput}
+                    onChange={(e) => setRepoPathInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleOpenRepo(repoPathInput)}
+                    placeholder="/Users/boss/projects/awesome-app"
+                    className="w-full bg-neutral-950 border border-neutral-800 rounded-md py-2.5 pl-10 pr-3 text-sm text-neutral-200 placeholder:text-neutral-700 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+                  />
+                </div>
+                {repoError && (
+                  <p className="text-xs text-red-400 mt-2 flex items-center gap-1">
+                    <AlertTriangle className="w-3 h-3" />
+                    {repoError}
+                  </p>
+                )}
+              </div>
+
+              <button 
+                onClick={() => handleOpenRepo(repoPathInput)}
+                disabled={isValidating || !repoPathInput.trim()}
+                className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-sm font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {isValidating ? (
+                  <><RefreshCw className="w-4 h-4 animate-spin" /> Validating .git...</>
+                ) : (
+                  <>Open Directory</>
+                )}
+              </button>
+            </div>
+
+            <div className="mt-8">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-500 mb-3">Recent</h3>
+              <div className="space-y-2">
+                {[
+                  '~/projects/awesome-app',
+                  '~/dev/website-frontend',
+                  'C:/Users/Admin/Documents/api-server'
+                ].map(path => (
+                  <button 
+                    key={path}
+                    onClick={() => { setRepoPathInput(path); handleOpenRepo(path); }}
+                    className="w-full flex items-center gap-3 p-2.5 rounded-md hover:bg-neutral-800/50 border border-transparent hover:border-neutral-700/50 transition-all text-left group"
+                  >
+                    <FolderGit2 className="w-4 h-4 text-neutral-500 group-hover:text-indigo-400 transition-colors" />
+                    <span className="text-sm text-neutral-400 group-hover:text-neutral-200 truncate">{path}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col bg-neutral-950 text-neutral-300 font-sans selection:bg-indigo-500/30">
@@ -208,14 +352,18 @@ export default function GitBossPage() {
       <header className="h-14 border-b border-neutral-800 bg-neutral-900/80 backdrop-blur-md flex items-center justify-between px-4 shrink-0 z-10">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded bg-indigo-600 flex items-center justify-center text-white font-bold shadow-lg shadow-indigo-500/20">
+            <button 
+              onClick={() => setCurrentView('home')}
+              className="w-8 h-8 rounded bg-indigo-600 flex items-center justify-center text-white font-bold shadow-lg shadow-indigo-500/20 hover:bg-indigo-700 transition-colors"
+              title="Back to Home"
+            >
               GB
-            </div>
+            </button>
             <div>
               <h1 className="text-sm font-semibold text-neutral-100 tracking-tight">GitBoss</h1>
               <div className="text-xs text-neutral-500 flex items-center gap-1">
                 <FolderGit2 className="w-3 h-3" />
-                <span>~/projects/awesome-app</span>
+                <span className="truncate max-w-[200px]">{activeRepo}</span>
               </div>
             </div>
           </div>
@@ -367,6 +515,23 @@ export default function GitBossPage() {
           {/* Standard Remote Actions */}
           <div>
             <h2 className="text-xs font-bold uppercase tracking-wider text-neutral-500 mb-4 flex items-center gap-2">
+              <GitMerge className="w-4 h-4 text-emerald-400" />
+              Branching
+            </h2>
+            <div className="space-y-2 mb-8">
+              <button 
+                onClick={() => setIsMergeModalOpen(true)}
+                disabled={isWorking}
+                className="w-full p-2.5 rounded-md bg-neutral-900 border border-neutral-800 hover:border-neutral-600 transition-all flex items-center gap-3 disabled:opacity-50"
+              >
+                <GitMerge className="w-4 h-4 text-emerald-400" />
+                <div className="text-left">
+                  <div className="text-sm font-medium text-neutral-200">Merge Branch</div>
+                </div>
+              </button>
+            </div>
+
+            <h2 className="text-xs font-bold uppercase tracking-wider text-neutral-500 mb-4 flex items-center gap-2">
               <Cloud className="w-4 h-4 text-blue-400" />
               Remote
             </h2>
@@ -463,6 +628,23 @@ export default function GitBossPage() {
                   <div className="text-left">
                     <div className="text-sm font-medium text-indigo-400">Force Merge</div>
                     <div className="text-[10px] text-neutral-500 font-mono mt-0.5">merge -X theirs</div>
+                  </div>
+                </div>
+              </button>
+
+              <button 
+                onClick={handleClearStashes}
+                disabled={isWorking}
+                className="w-full relative group overflow-hidden rounded-md bg-neutral-900 border border-purple-900/30 hover:border-purple-500/50 transition-all"
+              >
+                <div className="absolute inset-0 bg-purple-500/5 group-hover:bg-purple-500/10 transition-colors" />
+                <div className="relative p-3 flex items-center gap-3">
+                  <div className="p-2 rounded bg-purple-500/10 text-purple-400">
+                    <Trash2 className="w-4 h-4" />
+                  </div>
+                  <div className="text-left">
+                    <div className="text-sm font-medium text-purple-400">Clear Stashes</div>
+                    <div className="text-[10px] text-neutral-500 font-mono mt-0.5">stash clear</div>
                   </div>
                 </div>
               </button>
@@ -606,6 +788,64 @@ export default function GitBossPage() {
                   className="px-4 py-2 rounded-md text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 transition-colors"
                 >
                   Save & Close
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Merge Modal */}
+      <AnimatePresence>
+        {isMergeModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-neutral-900 border border-neutral-800 rounded-xl shadow-2xl w-full max-w-md overflow-hidden"
+            >
+              <div className="p-4 border-b border-neutral-800 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <GitMerge className="w-5 h-5 text-emerald-400" />
+                  <h3 className="font-semibold text-neutral-100">Merge Branch</h3>
+                </div>
+                <button 
+                  onClick={() => setIsMergeModalOpen(false)}
+                  className="text-neutral-500 hover:text-neutral-300 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="p-6 space-y-4">
+                <p className="text-sm text-neutral-300">
+                  Select a branch to merge into <span className="font-mono text-indigo-400 bg-indigo-500/10 px-1 py-0.5 rounded">{currentBranch}</span>
+                </p>
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-neutral-400 uppercase tracking-wider">Branch to merge</label>
+                  <select 
+                    value={mergeTargetBranch}
+                    onChange={(e) => setMergeTargetBranch(e.target.value)}
+                    className="w-full bg-neutral-950 border border-neutral-800 rounded-md p-2.5 text-sm text-neutral-200 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                  >
+                    {branches.filter(b => b !== currentBranch).map(b => (
+                      <option key={b} value={b}>{b}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="p-4 border-t border-neutral-800 bg-neutral-900/50 flex justify-end gap-3">
+                <button 
+                  onClick={() => setIsMergeModalOpen(false)}
+                  className="px-4 py-2 rounded-md text-sm font-medium text-neutral-300 hover:bg-neutral-800 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleMergeConfirm}
+                  className="px-4 py-2 rounded-md text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 transition-colors"
+                >
+                  Merge Branch
                 </button>
               </div>
             </motion.div>
