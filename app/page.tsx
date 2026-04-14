@@ -42,10 +42,14 @@ export default function GitBossPage() {
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
   
   const [currentView, setCurrentView] = useState<'home' | 'dashboard'>('home');
-  const [repoPathInput, setRepoPathInput] = useState('');
-  const [activeRepo, setActiveRepo] = useState('~/projects/awesome-app');
+  const [repoPathInput, setRepoPathInput] = useState('/app/applet');
+  const [activeRepo, setActiveRepo] = useState('');
   const [isValidating, setIsValidating] = useState(false);
   const [repoError, setRepoError] = useState('');
+  
+  const [gitStatus, setGitStatus] = useState<any>(null);
+  const [branches, setBranches] = useState<string[]>([]);
+  const [commitMessage, setCommitMessage] = useState('');
   
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>({
     isOpen: false,
@@ -62,14 +66,52 @@ export default function GitBossPage() {
     terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [terminalLogs]);
 
-  const executeCommand = (command: string, logs: string[]) => {
+  const executeCommand = async (command: string, optimisticLogs?: string[]) => {
     setIsWorking(true);
     setTerminalLogs(prev => [...prev, '', `> ${command}`]);
     
-    setTimeout(() => {
-      setTerminalLogs(prev => [...prev, ...logs]);
+    try {
+      const res = await fetch('/api/git/command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: activeRepo, command })
+      });
+      
+      const data = await res.json();
+      
+      if (data.stdout) {
+        setTerminalLogs(prev => [...prev, ...data.stdout.trim().split('\n')]);
+      }
+      if (data.stderr) {
+        setTerminalLogs(prev => [...prev, ...data.stderr.trim().split('\n')]);
+      }
+      if (data.error) {
+        setTerminalLogs(prev => [...prev, `Error: ${data.error}`]);
+      }
+      
+      refreshStatus();
+    } catch (err: any) {
+      setTerminalLogs(prev => [...prev, `Error: ${err.message}`]);
+    } finally {
       setIsWorking(false);
-    }, 800);
+    }
+  };
+
+  const refreshStatus = async () => {
+    if (!activeRepo) return;
+    try {
+      const res = await fetch('/api/git/status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: activeRepo })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setGitStatus(data);
+        setCurrentBranch(data.currentBranch);
+        setBranches(data.branches || []);
+      }
+    } catch (e) {}
   };
 
   const requestConfirmation = (
@@ -94,17 +136,19 @@ export default function GitBossPage() {
 
   // --- Actions ---
 
+  const handleCommit = () => {
+    if (!commitMessage.trim()) return;
+    executeCommand(`git commit -am "${commitMessage.replace(/"/g, '\\"')}"`);
+    setCommitMessage('');
+  };
+
   const handleNukeChanges = () => {
     requestConfirmation(
       "Nuke All Changes?",
       "This will forcefully permanently delete all uncommitted changes in your working directory. This action CANNOT be undone.",
       "Nuke It",
       true,
-      () => executeCommand('git reset --hard HEAD && git clean -fd', [
-        'HEAD is now at 8f3a2b1 Update dashboard layout',
-        'Removing untracked files...',
-        'Working tree clean. All uncommitted changes have been forcefully removed.'
-      ])
+      () => executeCommand('git reset --hard HEAD && git clean -fd')
     );
   };
 
@@ -114,16 +158,7 @@ export default function GitBossPage() {
       "This will overwrite the remote branch with your local history. If others have pushed changes, their work will be lost.",
       "Force Push",
       true,
-      () => executeCommand(`git push --force-with-lease origin ${currentBranch}`, [
-        'Enumerating objects: 5, done.',
-        'Counting objects: 100% (5/5), done.',
-        'Delta compression using up to 8 threads',
-        'Compressing objects: 100% (3/3), done.',
-        'Writing objects: 100% (3/3), 328 bytes | 328.00 KiB/s, done.',
-        'Total 3 (delta 2), reused 0 (delta 0), pack-reused 0',
-        'To github.com:user/repo.git',
-        ` + 8f3a2b1...a1b2c3d ${currentBranch} -> ${currentBranch} (forced update)`
-      ])
+      () => executeCommand(`git push --force-with-lease origin ${currentBranch}`)
     );
   };
 
@@ -133,12 +168,7 @@ export default function GitBossPage() {
       "This will merge the target branch and automatically resolve ALL conflicts by accepting THEIR changes. Your conflicting changes will be lost.",
       "Force Merge",
       true,
-      () => executeCommand('git merge main -X theirs', [
-        'Auto-merging app/page.tsx',
-        'Merge made by the "ort" strategy.',
-        ' app/page.tsx | 2 +-',
-        ' 1 file changed, 1 insertion(+), 1 deletion(-)'
-      ])
+      () => executeCommand('git merge main -X theirs')
     );
   };
 
@@ -148,9 +178,7 @@ export default function GitBossPage() {
       "This will permanently delete ALL stashed changes. They cannot be recovered.",
       "Clear Stashes",
       true,
-      () => executeCommand('git stash clear', [
-        'Dropped all stashes.'
-      ])
+      () => executeCommand('git stash clear')
     );
   };
 
@@ -160,19 +188,8 @@ export default function GitBossPage() {
       "This will fetch the latest changes from the remote and attempt to pull them into your current branch.",
       "Sync Now",
       false,
-      () => executeCommand(`git fetch origin && git pull origin ${currentBranch}`, [
-        'From github.com:user/repo',
-        ` * branch            ${currentBranch} -> FETCH_HEAD`,
-        'Already up to date.'
-      ])
+      () => executeCommand(`git fetch origin && git pull origin ${currentBranch}`)
     );
-  };
-
-  const handleCommit = () => {
-    executeCommand('git add . && git commit -m "Update UI components"', [
-      `[${currentBranch} a1b2c3d] Update UI components`,
-      ' 2 files changed, 45 insertions(+), 12 deletions(-)'
-    ]);
   };
 
   const handlePull = () => {
@@ -181,12 +198,7 @@ export default function GitBossPage() {
       "This will fetch and merge the latest changes from the remote branch into your current branch.",
       "Pull",
       false,
-      () => executeCommand(`git pull origin ${currentBranch}`, [
-        'Updating 8f3a2b1..a1b2c3d',
-        'Fast-forward',
-        ' app/page.tsx | 12 +++++++++---',
-        ' 1 file changed, 9 insertions(+), 3 deletions(-)'
-      ])
+      () => executeCommand(`git pull origin ${currentBranch}`)
     );
   };
 
@@ -196,16 +208,7 @@ export default function GitBossPage() {
       "This will push your local commits to the remote repository.",
       "Push",
       false,
-      () => executeCommand(`git push origin ${currentBranch}`, [
-        'Enumerating objects: 5, done.',
-        'Counting objects: 100% (5/5), done.',
-        'Delta compression using up to 8 threads',
-        'Compressing objects: 100% (3/3), done.',
-        'Writing objects: 100% (3/3), 328 bytes | 328.00 KiB/s, done.',
-        'Total 3 (delta 2), reused 0 (delta 0), pack-reused 0',
-        `To github.com:user/repo.git`,
-        `   8f3a2b1..a1b2c3d  ${currentBranch} -> ${currentBranch}`
-      ])
+      () => executeCommand(`git push origin ${currentBranch}`)
     );
   };
 
@@ -218,53 +221,56 @@ export default function GitBossPage() {
       "Force Switch",
       true,
       () => {
-        executeCommand(`git checkout -f ${branch}`, [
-          `Switched to branch '${branch}'`,
-          `Your branch is up to date with 'origin/${branch}'.`
-        ]);
-        setCurrentBranch(branch);
+        executeCommand(`git checkout -f ${branch}`);
       }
     );
   };
 
   const handleMergeConfirm = () => {
     setIsMergeModalOpen(false);
-    executeCommand(`git merge ${mergeTargetBranch}`, [
-      `Updating 8f3a2b1..a1b2c3d`,
-      `Fast-forward`,
-      ` app/page.tsx | 12 +++++++++---`,
-      ` 1 file changed, 9 insertions(+), 3 deletions(-)`
-    ]);
+    executeCommand(`git merge ${mergeTargetBranch}`);
   };
 
-  const handleOpenRepo = (path: string) => {
+  const handleOpenRepo = async (path: string) => {
     if (!path.trim()) {
       setRepoError('Path cannot be empty');
       return;
     }
     setIsValidating(true);
     setRepoError('');
-    setTimeout(() => {
-      if (path.toLowerCase().includes('system32') || path === '/') {
-        setRepoError('Permission denied or invalid Git repository.');
+    
+    try {
+      const res = await fetch('/api/git/status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path })
+      });
+      
+      const data = await res.json();
+      
+      if (!res.ok) {
+        setRepoError(data.error || 'Failed to open repository');
         setIsValidating(false);
         return;
       }
+      
       setActiveRepo(path);
-      setIsValidating(false);
+      setGitStatus(data);
+      setCurrentBranch(data.currentBranch);
+      setBranches(data.branches || []);
       setCurrentView('dashboard');
       setTerminalLogs([
         `> cd ${path}`,
         '> git status',
-        'On branch main',
-        'Your branch is up to date with origin/main.',
-        'nothing to commit, working tree clean'
+        `On branch ${data.currentBranch}`,
+        data.files?.length === 0 ? 'nothing to commit, working tree clean' : `${data.files?.length} files changed`
       ]);
-      setCurrentBranch('main');
-    }, 800);
+    } catch (err: any) {
+      setRepoError(err.message);
+    } finally {
+      setIsValidating(false);
+    }
   };
-
-  const branches = ['main', 'feature/new-dashboard', 'bugfix/header-alignment', 'experimental/ai-tools'];
 
   if (currentView === 'home') {
     return (
@@ -324,9 +330,7 @@ export default function GitBossPage() {
               <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-500 mb-3">Recent</h3>
               <div className="space-y-2">
                 {[
-                  '~/projects/awesome-app',
-                  '~/dev/website-frontend',
-                  'C:/Users/Admin/Documents/api-server'
+                  '/app/applet',
                 ].map(path => (
                   <button 
                     key={path}
@@ -445,39 +449,42 @@ export default function GitBossPage() {
             <h2 className="text-xs font-bold uppercase tracking-wider text-neutral-500 mb-4">Working Tree</h2>
             
             <div className="space-y-1">
-              <div className="flex items-center justify-between group px-2 py-1.5 hover:bg-neutral-800/50 rounded cursor-pointer">
-                <div className="flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-amber-400" />
-                  <span className="text-sm text-neutral-300">app/page.tsx</span>
+              {gitStatus?.files?.map((file: any) => {
+                const isAdded = file.index === 'A' || file.working_dir === 'A' || file.working_dir === '?';
+                const isDeleted = file.working_dir === 'D' || file.index === 'D';
+                const statusChar = file.working_dir === '?' ? 'U' : (file.working_dir || file.index || 'M').trim();
+                
+                return (
+                  <div key={file.path} className="flex items-center justify-between group px-2 py-1.5 hover:bg-neutral-800/50 rounded cursor-pointer">
+                    <div className="flex items-center gap-2 overflow-hidden">
+                      <FileText className={`w-4 h-4 shrink-0 ${isAdded ? 'text-emerald-400' : isDeleted ? 'text-red-400' : 'text-amber-400'}`} />
+                      <span className="text-sm text-neutral-300 truncate">{file.path}</span>
+                    </div>
+                    <span className={`text-xs font-mono shrink-0 ${isAdded ? 'text-emerald-500' : isDeleted ? 'text-red-500' : 'text-amber-500'}`}>
+                      {statusChar}
+                    </span>
+                  </div>
+                );
+              })}
+              {(!gitStatus?.files || gitStatus.files.length === 0) && (
+                <div className="text-sm text-neutral-500 italic px-2 py-4 text-center">
+                  Working tree clean
                 </div>
-                <span className="text-xs font-mono text-amber-500">M</span>
-              </div>
-              <div className="flex items-center justify-between group px-2 py-1.5 hover:bg-neutral-800/50 rounded cursor-pointer">
-                <div className="flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-amber-400" />
-                  <span className="text-sm text-neutral-300">components/ui/button.tsx</span>
-                </div>
-                <span className="text-xs font-mono text-amber-500">M</span>
-              </div>
-              <div className="flex items-center justify-between group px-2 py-1.5 hover:bg-neutral-800/50 rounded cursor-pointer">
-                <div className="flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-emerald-400" />
-                  <span className="text-sm text-neutral-300">lib/utils.ts</span>
-                </div>
-                <span className="text-xs font-mono text-emerald-500">A</span>
-              </div>
+              )}
             </div>
           </div>
 
           <div className="p-4 flex-1 flex flex-col">
             <h2 className="text-xs font-bold uppercase tracking-wider text-neutral-500 mb-4">Commit</h2>
             <textarea 
+              value={commitMessage}
+              onChange={(e) => setCommitMessage(e.target.value)}
               className="w-full flex-1 min-h-[120px] bg-neutral-900 border border-neutral-700 rounded-md p-3 text-sm text-neutral-200 placeholder:text-neutral-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 resize-none mb-3"
               placeholder="What did you change, boss?"
             />
             <button 
               onClick={handleCommit}
-              disabled={isWorking}
+              disabled={isWorking || !commitMessage.trim()}
               className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-sm font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
             >
               <CheckCircle2 className="w-4 h-4" />
